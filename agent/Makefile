@@ -1,7 +1,8 @@
 CC      = gcc
 CFLAGS  = -Wall -Wextra -Iinclude -g
-LIBS    = -lsodium
-SRC     = src/main.c src/identity.c src/heartbeat.c src/fingerprint.c
+LIBS    = -lsodium -lpthread
+SRC     = src/main.c src/identity.c src/heartbeat.c \
+          src/fingerprint.c src/server.c src/job_runner.c
 OUT     = lithium
 
 all:

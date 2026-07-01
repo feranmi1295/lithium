@@ -9,7 +9,7 @@ assign(JobId) ->
         {ok, Job} ->
             case pick_node() of
                 {error, no_nodes} ->
-                    io:format("  [assign] No available nodes for job ~s~n", [JobId]),
+                    io:format("  [assign] No available nodes for ~s~n", [JobId]),
                     {error, no_nodes};
                 {ok, NodeId} ->
                     Now = erlang:system_time(second),
@@ -18,8 +18,8 @@ assign(JobId) ->
                         node_id    => NodeId,
                         started_at => Now
                     }),
-                    io:format("  [assign] Job ~s assigned to ~s~n", [JobId, NodeId]),
-                    dispatch_to_node(NodeId, JobId, Job),
+                    io:format("  [assign] Job ~s → ~s~n", [JobId, NodeId]),
+                    spawn(fun() -> dispatch_to_node(NodeId, JobId, Job) end),
                     {ok, NodeId}
             end
     end.
@@ -34,12 +34,9 @@ pick_node() ->
         _  ->
             Best = lists:foldl(fun(N, Acc) ->
                 case Acc of
-                    none ->
-                        N;
-                    _ ->
-                        ScoreN   = maps:get(score, N),
-                        ScoreAcc = maps:get(score, Acc),
-                        case ScoreN > ScoreAcc of
+                    none -> N;
+                    _    ->
+                        case maps:get(score, N) > maps:get(score, Acc) of
                             true  -> N;
                             false -> Acc
                         end
@@ -52,17 +49,40 @@ dispatch_to_node(NodeId, JobId, Job) ->
     Runtime  = maps:get(runtime,   Job),
     Command  = maps:get(command,   Job),
     ClientId = maps:get(client_id, Job),
-    io:format("  [dispatch] Sending job ~s to ~s~n",          [JobId, NodeId]),
-    io:format("  [dispatch] Runtime: ~s | Command: ~s~n",     [Runtime, Command]),
-    io:format("  [dispatch] Client: ~s~n",                    [ClientId]),
-    spawn(fun() -> simulate_execution(JobId, NodeId, Command) end).
 
-simulate_execution(JobId, NodeId, Command) ->
-    timer:sleep(2000),
-    Result = list_to_binary(
-        io_lib:format("Executed '~s' on ~s", [Command, NodeId])),
-    lithium_job_registry:update_job_status(JobId, #{
-        status => complete,
-        result => Result
-    }),
-    io:format("  [exec] Job ~s complete on ~s~n", [JobId, NodeId]).
+    Body = io_lib:format(
+        "{\"job_id\":\"~s\",\"client_id\":\"~s\","
+        "\"runtime\":\"~s\",\"command\":\"~s\"}",
+        [JobId, ClientId, Runtime, Command]),
+
+    BodyBin = list_to_binary(Body),
+    Len     = integer_to_list(byte_size(BodyBin)),
+
+    Request = list_to_binary([
+        "POST /job HTTP/1.0\r\n",
+        "Host: 127.0.0.1:7701\r\n",
+        "Content-Type: application/json\r\n",
+        "Content-Length: ", Len, "\r\n",
+        "\r\n",
+        BodyBin
+    ]),
+
+    case gen_tcp:connect({127,0,0,1}, 7701, [binary, {active, false}], 3000) of
+        {ok, Sock} ->
+            gen_tcp:send(Sock, Request),
+            case gen_tcp:recv(Sock, 0, 3000) of
+                {ok, Resp} ->
+                    case binary:match(Resp, <<"200">>) of
+                        nomatch ->
+                            io:format("  [dispatch] Node rejected job ~s~n", [JobId]);
+                        _ ->
+                            io:format("  [dispatch] Node accepted job ~s~n", [JobId])
+                    end;
+                _ ->
+                    io:format("  [dispatch] No response from node~n", [])
+            end,
+            gen_tcp:close(Sock);
+        {error, Reason} ->
+            io:format("  [dispatch] Cannot reach node: ~p~n", [Reason]),
+            lithium_job_registry:update_job_status(JobId, #{status => failed})
+    end.

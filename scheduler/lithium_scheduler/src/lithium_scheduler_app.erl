@@ -12,11 +12,12 @@ start(_StartType, _StartArgs) ->
 
     Dispatch = cowboy_router:compile([
         {'_', [
-            {"/ping",        lithium_ping_handler,      []},
-            {"/heartbeat",   lithium_heartbeat_handler, []},
-            {"/nodes",       lithium_nodes_handler,     []},
-            {"/jobs",        lithium_job_handler,       []},
-            {"/jobs/:id",    lithium_job_handler,       []}
+            {"/ping",        lithium_ping_handler,     []},
+            {"/heartbeat",   lithium_heartbeat_handler,[]},
+            {"/nodes",       lithium_nodes_handler,    []},
+            {"/jobs",        lithium_job_handler,      []},
+            {"/jobs/:id",    lithium_job_handler,      []},
+            {"/job_result",  lithium_result_handler,   []}
         ]}
     ]),
 
