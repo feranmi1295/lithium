@@ -1,0 +1,9 @@
+{application, lithium_scheduler, [
+    {description, "Lithium Protocol Scheduler"},
+    {vsn, "1.0.0"},
+    {registered, []},
+    {mod, {lithium_scheduler_app, []}},
+    {applications, [kernel, stdlib, cowboy]},
+    {env, []},
+    {modules, []}
+]}.

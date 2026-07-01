@@ -3,7 +3,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#include <time.h>
 
 #define SCHEDULER_HOST "127.0.0.1"
 #define SCHEDULER_PORT 7700
@@ -22,6 +21,7 @@ static int send_heartbeat_http(const NodeIdentity *id) {
         return -1;
     }
 
+    /* build JSON body */
     char pubkey_hex[crypto_sign_PUBLICKEYBYTES * 2 + 1];
     sodium_bin2hex(pubkey_hex, sizeof(pubkey_hex),
                    id->public_key, crypto_sign_PUBLICKEYBYTES);
@@ -31,6 +31,7 @@ static int send_heartbeat_http(const NodeIdentity *id) {
         "{\"node_id\":\"%s\",\"public_key\":\"%s\"}",
         id->node_id, pubkey_hex);
 
+    /* build HTTP POST request */
     char request[1024];
     snprintf(request, sizeof(request),
         "POST /heartbeat HTTP/1.0\r\n"
@@ -43,10 +44,12 @@ static int send_heartbeat_http(const NodeIdentity *id) {
 
     send(sock, request, strlen(request), 0);
 
+    /* read response status */
     char resp[256] = {0};
     recv(sock, resp, sizeof(resp) - 1, 0);
     close(sock);
 
+    /* check for 200 */
     return (strstr(resp, "200") != NULL) ? 0 : -1;
 }
 
