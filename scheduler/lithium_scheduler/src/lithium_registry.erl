@@ -5,22 +5,29 @@
 
 start() ->
     ets:new(lithium_nodes, [named_table, public, set,
-                             {keypos, 1}, {read_concurrency, true}]),
-    io:format("  Node registry initialized~n").
+                            {keypos, 1}, {read_concurrency, true}]),
+    %% load persisted nodes
+    Nodes = lithium_db:load_nodes(),
+    lists:foreach(fun(Node) ->
+        NodeId = maps:get(node_id, Node),
+        ets:insert(lithium_nodes, {NodeId, Node})
+    end, Nodes),
+    io:format("  Node registry initialized (~p nodes restored)~n", [length(Nodes)]).
 
 register_node(NodeId, PublicKey) ->
     Now = erlang:system_time(second),
     Node = #{
-        node_id       => NodeId,
-        public_key    => PublicKey,
-        registered_at => Now,
-        last_seen     => Now,
-        status        => active,
-        score         => 100,
-        missed_pings  => 0,
+        node_id        => NodeId,
+        public_key     => PublicKey,
+        registered_at  => Now,
+        last_seen      => Now,
+        status         => active,
+        score          => 100,
+        missed_pings   => 0,
         jobs_completed => 0
     },
     ets:insert(lithium_nodes, {NodeId, Node}),
+    lithium_db:save_node(NodeId, Node),
     io:format("  [registry] Node registered: ~s~n", [NodeId]),
     {ok, NodeId}.
 
@@ -28,12 +35,9 @@ update_heartbeat(NodeId) ->
     Now = erlang:system_time(second),
     case ets:lookup(lithium_nodes, NodeId) of
         [{NodeId, Node}] ->
-            Updated = Node#{
-                last_seen    => Now,
-                missed_pings => 0,
-                status       => active
-            },
+            Updated = Node#{last_seen => Now, missed_pings => 0, status => active},
             ets:insert(lithium_nodes, {NodeId, Updated}),
+            lithium_db:save_node(NodeId, Updated),
             {ok, updated};
         [] ->
             {error, not_found}
@@ -54,10 +58,10 @@ mark_degraded(NodeId) ->
             Missed  = maps:get(missed_pings, Node, 0) + 1,
             Updated = Node#{status => degraded, missed_pings => Missed},
             ets:insert(lithium_nodes, {NodeId, Updated}),
+            lithium_db:save_node(NodeId, Updated),
             io:format("  [registry] Node degraded: ~s (missed: ~p)~n", [NodeId, Missed]),
             {ok, degraded};
-        [] ->
-            {error, not_found}
+        [] -> {error, not_found}
     end.
 
 mark_inactive(NodeId) ->
@@ -65,8 +69,8 @@ mark_inactive(NodeId) ->
         [{NodeId, Node}] ->
             Updated = Node#{status => inactive},
             ets:insert(lithium_nodes, {NodeId, Updated}),
+            lithium_db:save_node(NodeId, Updated),
             io:format("  [registry] Node inactive: ~s~n", [NodeId]),
             {ok, inactive};
-        [] ->
-            {error, not_found}
+        [] -> {error, not_found}
     end.
