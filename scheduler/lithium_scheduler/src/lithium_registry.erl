@@ -1,12 +1,11 @@
 -module(lithium_registry).
 
--export([start/0, register_node/2, update_heartbeat/1,
+-export([start/0, register_node/4, update_heartbeat/3,
          get_node/1, all_nodes/0, mark_degraded/1, mark_inactive/1]).
 
 start() ->
     ets:new(lithium_nodes, [named_table, public, set,
                             {keypos, 1}, {read_concurrency, true}]),
-    %% load persisted nodes
     Nodes = lithium_db:load_nodes(),
     lists:foreach(fun(Node) ->
         NodeId = maps:get(node_id, Node),
@@ -14,11 +13,13 @@ start() ->
     end, Nodes),
     io:format("  Node registry initialized (~p nodes restored)~n", [length(Nodes)]).
 
-register_node(NodeId, PublicKey) ->
+register_node(NodeId, PublicKey, Ip, Port) ->
     Now = erlang:system_time(second),
     Node = #{
         node_id        => NodeId,
         public_key     => PublicKey,
+        ip             => Ip,
+        port           => Port,
         registered_at  => Now,
         last_seen      => Now,
         status         => active,
@@ -28,14 +29,20 @@ register_node(NodeId, PublicKey) ->
     },
     ets:insert(lithium_nodes, {NodeId, Node}),
     lithium_db:save_node(NodeId, Node),
-    io:format("  [registry] Node registered: ~s~n", [NodeId]),
+    io:format("  [registry] Node registered: ~s @ ~s:~s~n", [NodeId, Ip, Port]),
     {ok, NodeId}.
 
-update_heartbeat(NodeId) ->
+update_heartbeat(NodeId, Ip, Port) ->
     Now = erlang:system_time(second),
     case ets:lookup(lithium_nodes, NodeId) of
         [{NodeId, Node}] ->
-            Updated = Node#{last_seen => Now, missed_pings => 0, status => active},
+            Updated = Node#{
+                last_seen    => Now,
+                missed_pings => 0,
+                status       => active,
+                ip           => Ip,
+                port         => Port
+            },
             ets:insert(lithium_nodes, {NodeId, Updated}),
             lithium_db:save_node(NodeId, Updated),
             {ok, updated};

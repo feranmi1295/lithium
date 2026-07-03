@@ -7,18 +7,19 @@ init(Req0, State) ->
 
 handle(<<"POST">>, Req0, State) ->
     {ok, Body, Req1} = cowboy_req:read_body(Req0),
-    case parse_json_field(Body, <<"node_id">>) of
+    case get_field(Body, <<"node_id">>) of
         {ok, NodeId} ->
+            Ip   = get_field_default(Body, <<"ip">>,   <<"127.0.0.1">>),
+            Port = get_field_default(Body, <<"port">>,  <<"7701">>),
             case lithium_registry:get_node(NodeId) of
-                {ok, _Node} ->
-                    lithium_registry:update_heartbeat(NodeId),
-                    reply(200, <<"{\"status\":\"ok\",\"message\":\"heartbeat received\"}">>, Req1, State);
+                {ok, _} ->
+                    lithium_registry:update_heartbeat(NodeId, Ip, Port),
+                    reply(200, <<"{\"status\":\"ok\"}">>, Req1, State);
                 {error, not_found} ->
-                    %% auto-register if new node sends heartbeat with public key
-                    case parse_json_field(Body, <<"public_key">>) of
+                    case get_field(Body, <<"public_key">>) of
                         {ok, PubKey} ->
-                            lithium_registry:register_node(NodeId, PubKey),
-                            reply(200, <<"{\"status\":\"ok\",\"message\":\"node registered\"}">>, Req1, State);
+                            lithium_registry:register_node(NodeId, PubKey, Ip, Port),
+                            reply(200, <<"{\"status\":\"ok\",\"message\":\"registered\"}">>, Req1, State);
                         _ ->
                             reply(404, <<"{\"error\":\"node not found\"}">>, Req1, State)
                     end
@@ -36,19 +37,22 @@ reply(Code, Body, Req, State) ->
         Body, Req),
     {ok, Req2, State}.
 
-%% minimal json field extractor — no deps needed
-parse_json_field(Body, Field) ->
+get_field(Body, Field) ->
     Str = binary_to_list(Body),
     Key = "\"" ++ binary_to_list(Field) ++ "\":\"",
     case string:str(Str, Key) of
-        0 -> {error, not_found};
+        0   -> {error, not_found};
         Pos ->
             Start = Pos + length(Key),
             Rest  = string:sub_string(Str, Start),
             End   = string:str(Rest, "\""),
-            if End > 0 ->
-                Val = string:sub_string(Rest, 1, End - 1),
-                {ok, list_to_binary(Val)};
-               true -> {error, malformed}
+            if End > 0 -> {ok, list_to_binary(string:sub_string(Rest, 1, End - 1))};
+               true    -> {error, malformed}
             end
+    end.
+
+get_field_default(Body, Field, Default) ->
+    case get_field(Body, Field) of
+        {ok, Val} -> Val;
+        _         -> Default
     end.
