@@ -8,6 +8,7 @@ start(_StartType, _StartArgs) ->
     io:format("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━~n"),
 
     lithium_db:start(),
+    lithium_crypto:start(),
     lithium_registry:start(),
     lithium_job_registry:start(),
 
@@ -18,7 +19,8 @@ start(_StartType, _StartArgs) ->
             {"/nodes",      lithium_nodes_handler,     []},
             {"/jobs",       lithium_job_handler,       []},
             {"/jobs/:id",   lithium_job_handler,       []},
-            {"/job_result", lithium_result_handler,    []}
+            {"/job_result", lithium_result_handler,    []},
+            {"/pubkey",     lithium_pubkey_handler,    []}
         ]}
     ]),
 

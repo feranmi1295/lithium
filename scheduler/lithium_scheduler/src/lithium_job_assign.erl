@@ -54,23 +54,30 @@ dispatch_to_node(Node, JobId, Job) ->
     Command  = maps:get(command,   Job),
     ClientId = maps:get(client_id, Job),
 
-    %% convert port to integer
     PortInt = case Port of
         P when is_integer(P) -> P;
         P when is_binary(P)  -> binary_to_integer(P);
         P when is_list(P)    -> list_to_integer(P)
     end,
 
-    %% convert IP to string
     IpStr = case Ip of
         I when is_binary(I) -> binary_to_list(I);
         I when is_list(I)   -> I
     end,
 
+    %% build payload to sign
+    Payload = list_to_binary(io_lib:format(
+        "~s:~s:~s:~s", [JobId, ClientId, Runtime, Command])),
+
+    %% sign it
+    Signature = lithium_crypto:sign_job(Payload),
+    PubKey    = lithium_crypto:get_public_key(),
+
     Body = list_to_binary(io_lib:format(
         "{\"job_id\":\"~s\",\"client_id\":\"~s\","
-        "\"runtime\":\"~s\",\"command\":\"~s\"}",
-        [JobId, ClientId, Runtime, Command])),
+        "\"runtime\":\"~s\",\"command\":\"~s\","
+        "\"signature\":\"~s\",\"scheduler_pubkey\":\"~s\"}",
+        [JobId, ClientId, Runtime, Command, Signature, PubKey])),
 
     Len     = integer_to_list(byte_size(Body)),
     Request = list_to_binary([
@@ -82,7 +89,7 @@ dispatch_to_node(Node, JobId, Job) ->
         Body
     ]),
 
-    io:format("  [dispatch] Sending job ~s to ~s @ ~s:~p~n",
+    io:format("  [dispatch] Signed job ~s → ~s @ ~s:~p~n",
               [JobId, NodeId, IpStr, PortInt]),
 
     IpTuple = list_to_tuple([list_to_integer(X)
@@ -96,7 +103,8 @@ dispatch_to_node(Node, JobId, Job) ->
                     case binary:match(Resp, <<"200">>) of
                         nomatch ->
                             io:format("  [dispatch] Node rejected job~n"),
-                            lithium_job_registry:update_job_status(JobId, #{status => failed});
+                            lithium_job_registry:update_job_status(JobId,
+                                #{status => failed});
                         _ ->
                             io:format("  [dispatch] Node accepted job ~s~n", [JobId])
                     end;
@@ -106,6 +114,7 @@ dispatch_to_node(Node, JobId, Job) ->
             end,
             gen_tcp:close(Sock);
         {error, Reason} ->
-            io:format("  [dispatch] Cannot reach ~s:~p — ~p~n", [IpStr, PortInt, Reason]),
+            io:format("  [dispatch] Cannot reach ~s:~p — ~p~n",
+                      [IpStr, PortInt, Reason]),
             lithium_job_registry:update_job_status(JobId, #{status => failed})
     end.

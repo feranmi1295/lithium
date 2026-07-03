@@ -8,6 +8,8 @@ typedef struct {
     char client_id[64];
     char runtime[32];
     char command[512];
+    char signature[256];
+    char scheduler_pubkey[256];
 } Job;
 
 typedef struct {
