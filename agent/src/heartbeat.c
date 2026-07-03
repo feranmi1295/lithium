@@ -1,4 +1,5 @@
 #include "heartbeat.h"
+#include "server.h"
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -9,30 +10,24 @@
 #define SCHEDULER_HOST "127.0.0.1"
 #define SCHEDULER_PORT 7700
 
-/* get this machine's local IP */
 static void get_local_ip(char *out, size_t len) {
     struct ifaddrs *ifaddr, *ifa;
     strcpy(out, "127.0.0.1");
-
     if (getifaddrs(&ifaddr) == -1) return;
-
     for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
         if (!ifa->ifa_addr) continue;
         if (ifa->ifa_addr->sa_family != AF_INET) continue;
-
-        /* skip loopback */
         struct sockaddr_in *sa = (struct sockaddr_in *)ifa->ifa_addr;
         char ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &sa->sin_addr, ip, sizeof(ip));
         if (strncmp(ip, "127.", 4) == 0) continue;
-
         strncpy(out, ip, len - 1);
         break;
     }
     freeifaddrs(ifaddr);
 }
 
-static int send_heartbeat_http(const NodeIdentity *id) {
+static int send_heartbeat_http(const NodeIdentity *id, int node_port) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) return -1;
 
@@ -42,8 +37,7 @@ static int send_heartbeat_http(const NodeIdentity *id) {
     inet_pton(AF_INET, SCHEDULER_HOST, &addr.sin_addr);
 
     if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        close(sock);
-        return -1;
+        close(sock); return -1;
     }
 
     char pubkey_hex[crypto_sign_PUBLICKEYBYTES * 2 + 1];
@@ -56,8 +50,8 @@ static int send_heartbeat_http(const NodeIdentity *id) {
     char body[512];
     snprintf(body, sizeof(body),
         "{\"node_id\":\"%s\",\"public_key\":\"%s\","
-        "\"ip\":\"%s\",\"port\":7701}",
-        id->node_id, pubkey_hex, node_ip);
+        "\"ip\":\"%s\",\"port\":\"%d\"}",
+        id->node_id, pubkey_hex, node_ip, node_port);
 
     char request[1024];
     snprintf(request, sizeof(request),
@@ -69,22 +63,21 @@ static int send_heartbeat_http(const NodeIdentity *id) {
         SCHEDULER_HOST, SCHEDULER_PORT, strlen(body), body);
 
     send(sock, request, strlen(request), 0);
-
     char resp[256] = {0};
     recv(sock, resp, sizeof(resp) - 1, 0);
     close(sock);
-
     return (strstr(resp, "200") != NULL) ? 0 : -1;
 }
 
-void heartbeat_loop(const NodeIdentity *id, int interval_seconds) {
+static void run_heartbeat(const NodeIdentity *id,
+                           int interval_seconds, int port) {
     char node_ip[INET_ADDRSTRLEN];
     get_local_ip(node_ip, sizeof(node_ip));
 
     printf("\n🔋 Lithium Node Agent v%s\n", LITHIUM_VERSION);
     printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
     printf("  Node     : %s\n", id->node_id);
-    printf("  Node IP  : %s:7701\n", node_ip);
+    printf("  Node IP  : %s:%d\n", node_ip, port);
     printf("  Scheduler: %s:%d\n", SCHEDULER_HOST, SCHEDULER_PORT);
     printf("  Heartbeat: every %ds\n", interval_seconds);
     printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n");
@@ -97,15 +90,23 @@ void heartbeat_loop(const NodeIdentity *id, int interval_seconds) {
         char timebuf[32];
         strftime(timebuf, sizeof(timebuf), "%H:%M:%S", t);
 
-        int result = send_heartbeat_http(id);
-        if (result == 0) {
+        int result = send_heartbeat_http(id, port);
+        if (result == 0)
             printf("[%s] ♥ heartbeat #%d — %s → scheduler OK\n",
                    timebuf, tick, id->node_id);
-        } else {
+        else
             printf("[%s] ✗ heartbeat #%d — scheduler unreachable\n",
                    timebuf, tick);
-        }
         fflush(stdout);
         sleep(interval_seconds);
     }
+}
+
+void heartbeat_loop(const NodeIdentity *id, int interval_seconds) {
+    run_heartbeat(id, interval_seconds, NODE_PORT);
+}
+
+void heartbeat_loop_port(const NodeIdentity *id,
+                          int interval_seconds, int port) {
+    run_heartbeat(id, interval_seconds, port);
 }

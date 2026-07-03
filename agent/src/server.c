@@ -24,16 +24,14 @@ static void send_response(int fd, int code, const char *body) {
 
 static void *handle_connection(void *arg) {
     HandlerArgs *args = (HandlerArgs *)arg;
-    int fd = args->client_fd;
-    NodeIdentity id = args->id;
+    int fd            = args->client_fd;
+    NodeIdentity id   = args->id;
     free(args);
 
-    /* read HTTP request */
     char buf[8192] = {0};
     ssize_t n = recv(fd, buf, sizeof(buf) - 1, 0);
     if (n <= 0) { close(fd); return NULL; }
 
-    /* find JSON body after headers */
     char *body = strstr(buf, "\r\n\r\n");
     if (!body) {
         send_response(fd, 400, "{\"error\":\"bad request\"}");
@@ -42,7 +40,6 @@ static void *handle_connection(void *arg) {
     }
     body += 4;
 
-    /* check path */
     if (strstr(buf, "POST /job")) {
         Job job;
         if (job_parse(body, &job) < 0) {
@@ -50,11 +47,9 @@ static void *handle_connection(void *arg) {
             close(fd);
             return NULL;
         }
-
         send_response(fd, 200, "{\"status\":\"accepted\"}");
         close(fd);
 
-        /* run job and report result */
         JobResult result;
         job_run(&job, &result);
         strncpy(result.node_id, id.node_id, sizeof(result.node_id) - 1);
@@ -71,16 +66,12 @@ static void *handle_connection(void *arg) {
         send_response(fd, 404, "{\"error\":\"not found\"}");
         close(fd);
     }
-
     return NULL;
 }
 
-void server_start(const NodeIdentity *id) {
+static void run_server(const NodeIdentity *id, int port) {
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0) {
-        perror("socket");
-        return;
-    }
+    if (server_fd < 0) { perror("socket"); return; }
 
     int opt = 1;
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -88,16 +79,14 @@ void server_start(const NodeIdentity *id) {
     struct sockaddr_in addr;
     addr.sin_family      = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port        = htons(NODE_PORT);
+    addr.sin_port        = htons(port);
 
     if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        perror("bind");
-        close(server_fd);
-        return;
+        perror("bind"); close(server_fd); return;
     }
 
     listen(server_fd, 10);
-    printf("  Job receiver: listening on port %d\n", NODE_PORT);
+    printf("  Job receiver: listening on port %d\n", port);
     fflush(stdout);
 
     while (1) {
@@ -115,4 +104,12 @@ void server_start(const NodeIdentity *id) {
         pthread_create(&thread, NULL, handle_connection, args);
         pthread_detach(thread);
     }
+}
+
+void server_start(const NodeIdentity *id) {
+    run_server(id, NODE_PORT);
+}
+
+void server_start_port(const NodeIdentity *id, int port) {
+    run_server(id, port);
 }

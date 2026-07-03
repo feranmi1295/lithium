@@ -11,6 +11,7 @@ start(_StartType, _StartArgs) ->
     lithium_crypto:start(),
     lithium_registry:start(),
     lithium_job_registry:start(),
+    lithium_job_assign:init_counter(),
 
     Dispatch = cowboy_router:compile([
         {'_', [

@@ -1,6 +1,6 @@
 -module(lithium_job_assign).
 
--export([assign/1]).
+-export([assign/1, init_counter/0]).
 
 assign(JobId) ->
     case lithium_job_registry:get_job(JobId) of
@@ -25,25 +25,45 @@ assign(JobId) ->
             end
     end.
 
+init_counter() ->
+    case ets:info(lithium_rr) of
+        undefined ->
+            ets:new(lithium_rr, [named_table, public, set]),
+            ets:insert(lithium_rr, {counter, 0});
+        _ ->
+            ok
+    end.
+
+get_counter() ->
+    init_counter(),
+    case ets:lookup(lithium_rr, counter) of
+        [{counter, N}] -> N;
+        []             -> 0
+    end.
+
+bump_counter() ->
+    init_counter(),
+    ets:update_counter(lithium_rr, counter, 1).
+
 pick_node() ->
     Nodes  = lithium_registry:all_nodes(),
     Active = lists:filter(fun(N) ->
         maps:get(status, N) =:= active
     end, Nodes),
     case Active of
-        [] -> {error, no_nodes};
-        _  ->
-            Best = lists:foldl(fun(N, Acc) ->
-                case Acc of
-                    none -> N;
-                    _    ->
-                        case maps:get(score, N) > maps:get(score, Acc) of
-                            true  -> N;
-                            false -> Acc
-                        end
-                end
-            end, none, Active),
-            {ok, Best}
+        []    -> {error, no_nodes};
+        [One] -> {ok, One};
+        _     ->
+            Sorted = lists:sort(fun(A, B) ->
+                maps:get(score, A) >= maps:get(score, B)
+            end, Active),
+            MaxScore = maps:get(score, hd(Sorted)),
+            TopNodes = lists:filter(fun(N) ->
+                maps:get(score, N) =:= MaxScore
+            end, Sorted),
+            Idx = get_counter() rem length(TopNodes),
+            bump_counter(),
+            {ok, lists:nth(Idx + 1, TopNodes)}
     end.
 
 dispatch_to_node(Node, JobId, Job) ->
@@ -65,11 +85,8 @@ dispatch_to_node(Node, JobId, Job) ->
         I when is_list(I)   -> I
     end,
 
-    %% build payload to sign
-    Payload = list_to_binary(io_lib:format(
+    Payload   = list_to_binary(io_lib:format(
         "~s:~s:~s:~s", [JobId, ClientId, Runtime, Command])),
-
-    %% sign it
     Signature = lithium_crypto:sign_job(Payload),
     PubKey    = lithium_crypto:get_public_key(),
 
@@ -85,8 +102,7 @@ dispatch_to_node(Node, JobId, Job) ->
         "Host: ", IpStr, ":", integer_to_list(PortInt), "\r\n",
         "Content-Type: application/json\r\n",
         "Content-Length: ", Len, "\r\n",
-        "\r\n",
-        Body
+        "\r\n", Body
     ]),
 
     io:format("  [dispatch] Signed job ~s → ~s @ ~s:~p~n",
@@ -109,7 +125,7 @@ dispatch_to_node(Node, JobId, Job) ->
                             io:format("  [dispatch] Node accepted job ~s~n", [JobId])
                     end;
                 _ ->
-                    io:format("  [dispatch] No response from node~n"),
+                    io:format("  [dispatch] No response~n"),
                     lithium_job_registry:update_job_status(JobId, #{status => failed})
             end,
             gen_tcp:close(Sock);
