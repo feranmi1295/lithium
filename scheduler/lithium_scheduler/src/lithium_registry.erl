@@ -1,7 +1,8 @@
 -module(lithium_registry).
 
 -export([start/0, register_node/4, update_heartbeat/3,
-         get_node/1, all_nodes/0, mark_degraded/1, mark_inactive/1]).
+         get_node/1, all_nodes/0, mark_degraded/1,
+         mark_inactive/1, mark_suspended/1, update_score/2]).
 
 start() ->
     ets:new(lithium_nodes, [named_table, public, set,
@@ -11,7 +12,8 @@ start() ->
         NodeId = maps:get(node_id, Node),
         ets:insert(lithium_nodes, {NodeId, Node})
     end, Nodes),
-    io:format("  Node registry initialized (~p nodes restored)~n", [length(Nodes)]).
+    io:format("  Node registry initialized (~p nodes restored)~n",
+              [length(Nodes)]).
 
 register_node(NodeId, PublicKey, Ip, Port) ->
     Now = erlang:system_time(second),
@@ -29,7 +31,8 @@ register_node(NodeId, PublicKey, Ip, Port) ->
     },
     ets:insert(lithium_nodes, {NodeId, Node}),
     lithium_db:save_node(NodeId, Node),
-    io:format("  [registry] Node registered: ~s @ ~s:~s~n", [NodeId, Ip, Port]),
+    io:format("  [registry] Node registered: ~s @ ~s:~s~n",
+              [NodeId, Ip, Port]),
     {ok, NodeId}.
 
 update_heartbeat(NodeId, Ip, Port) ->
@@ -50,6 +53,17 @@ update_heartbeat(NodeId, Ip, Port) ->
             {error, not_found}
     end.
 
+update_score(NodeId, Updates) ->
+    case ets:lookup(lithium_nodes, NodeId) of
+        [{NodeId, Node}] ->
+            Updated = maps:merge(Node, Updates),
+            ets:insert(lithium_nodes, {NodeId, Updated}),
+            lithium_db:save_node(NodeId, Updated),
+            {ok, updated};
+        [] ->
+            {error, not_found}
+    end.
+
 get_node(NodeId) ->
     case ets:lookup(lithium_nodes, NodeId) of
         [{NodeId, Node}] -> {ok, Node};
@@ -57,7 +71,8 @@ get_node(NodeId) ->
     end.
 
 all_nodes() ->
-    ets:foldl(fun({_Id, Node}, Acc) -> [Node | Acc] end, [], lithium_nodes).
+    ets:foldl(fun({_Id, Node}, Acc) -> [Node | Acc] end,
+              [], lithium_nodes).
 
 mark_degraded(NodeId) ->
     case ets:lookup(lithium_nodes, NodeId) of
@@ -66,7 +81,8 @@ mark_degraded(NodeId) ->
             Updated = Node#{status => degraded, missed_pings => Missed},
             ets:insert(lithium_nodes, {NodeId, Updated}),
             lithium_db:save_node(NodeId, Updated),
-            io:format("  [registry] Node degraded: ~s (missed: ~p)~n", [NodeId, Missed]),
+            io:format("  [registry] Node degraded: ~s (missed: ~p)~n",
+                      [NodeId, Missed]),
             {ok, degraded};
         [] -> {error, not_found}
     end.
@@ -79,5 +95,16 @@ mark_inactive(NodeId) ->
             lithium_db:save_node(NodeId, Updated),
             io:format("  [registry] Node inactive: ~s~n", [NodeId]),
             {ok, inactive};
+        [] -> {error, not_found}
+    end.
+
+mark_suspended(NodeId) ->
+    case ets:lookup(lithium_nodes, NodeId) of
+        [{NodeId, Node}] ->
+            Updated = Node#{status => suspended},
+            ets:insert(lithium_nodes, {NodeId, Updated}),
+            lithium_db:save_node(NodeId, Updated),
+            io:format("  [registry] Node suspended: ~s~n", [NodeId]),
+            {ok, suspended};
         [] -> {error, not_found}
     end.
