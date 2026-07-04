@@ -1,5 +1,6 @@
 #include "heartbeat.h"
 #include "server.h"
+#include "fingerprint.h"
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -47,11 +48,15 @@ static int send_heartbeat_http(const NodeIdentity *id, int node_port) {
     char node_ip[INET_ADDRSTRLEN];
     get_local_ip(node_ip, sizeof(node_ip));
 
-    char body[512];
+    char fingerprint[128] = {0};
+    generate_fingerprint(fingerprint, sizeof(fingerprint));
+
+    char body[768];
     snprintf(body, sizeof(body),
         "{\"node_id\":\"%s\",\"public_key\":\"%s\","
-        "\"ip\":\"%s\",\"port\":\"%d\"}",
-        id->node_id, pubkey_hex, node_ip, node_port);
+        "\"ip\":\"%s\",\"port\":\"%d\","
+        "\"fingerprint\":\"%s\"}",
+        id->node_id, pubkey_hex, node_ip, node_port, fingerprint);
 
     char request[1024];
     snprintf(request, sizeof(request),

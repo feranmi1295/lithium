@@ -15,60 +15,55 @@ handle(<<"POST">>, <<"/jobs">>, Req0, State) ->
     Command  = get_field(Body, <<"command">>,   <<"echo hello">>),
 
     {ok, JobId} = lithium_job_registry:create_job(ClientId, Runtime, Command),
-    {ok, NodeId} = case lithium_job_assign:assign(JobId) of
-        {ok, N}            -> {ok, N};
-        {error, no_nodes}  -> {ok, <<"none">>}
+    AssignedTo  = case lithium_job_assign:assign(JobId) of
+        {ok, N}           -> N;
+        {error, no_nodes} -> <<"none">>
     end,
 
-    RespBody = io_lib:format(
+    RespBody = list_to_binary(io_lib:format(
         "{\"status\":\"ok\",\"job_id\":\"~s\",\"assigned_to\":\"~s\"}",
-        [JobId, NodeId]),
-
-    reply(200, list_to_binary(RespBody), Req1, State);
+        [JobId, AssignedTo])),
+    reply(200, RespBody, Req1, State);
 
 %% GET /jobs — list all jobs
 handle(<<"GET">>, <<"/jobs">>, Req, State) ->
-    Jobs = lithium_job_registry:all_jobs(),
-    Lines = lists:map(fun(Job) ->
-        JobId    = maps:get(job_id,   Job),
-        Status   = maps:get(status,   Job),
-        NodeId   = maps:get(node_id,  Job),
-        Command  = maps:get(command,  Job),
-        Result   = maps:get(result,   Job),
-        ResultStr = case Result of
-            none -> <<"null">>;
-            R    -> io_lib:format("\"~s\"", [R])
-        end,
-        io_lib:format(
-            "{\"job_id\":\"~s\",\"status\":\"~s\",\"node_id\":\"~s\",\"command\":\"~s\",\"result\":~s}",
-            [JobId, Status, NodeId, Command, ResultStr])
-    end, Jobs),
+    Jobs  = lithium_job_registry:all_jobs(),
+    Lines = lists:map(fun(Job) -> format_job(Job) end, Jobs),
     Joined = string:join(Lines, ","),
     reply(200, list_to_binary("[" ++ Joined ++ "]"), Req, State);
 
-%% GET /jobs/:id — get single job
+%% GET /jobs/JOB-XXXX — single job by ID
 handle(<<"GET">>, Path, Req, State) ->
-    JobId = binary:part(Path, {7, byte_size(Path) - 7}),
-    case lithium_job_registry:get_job(JobId) of
-        {ok, Job} ->
-            Status  = maps:get(status,  Job),
-            NodeId  = maps:get(node_id, Job),
-            Command = maps:get(command, Job),
-            Result  = maps:get(result,  Job),
-            ResultStr = case Result of
-                none -> <<"null">>;
-                R    -> io_lib:format("\"~s\"", [R])
-            end,
-            RespBody = io_lib:format(
-                "{\"job_id\":\"~s\",\"status\":\"~s\",\"node_id\":\"~s\",\"command\":\"~s\",\"result\":~s}",
-                [JobId, Status, NodeId, Command, ResultStr]),
-            reply(200, list_to_binary(RespBody), Req, State);
-        {error, not_found} ->
-            reply(404, <<"{\"error\":\"job not found\"}">>, Req, State)
+    %% extract job ID from path — everything after /jobs/
+    case Path of
+        <<"/jobs/", JobId/binary>> ->
+            case lithium_job_registry:get_job(JobId) of
+                {ok, Job} ->
+                    reply(200, list_to_binary(format_job(Job)), Req, State);
+                {error, not_found} ->
+                    reply(404, <<"{\"error\":\"job not found\"}">>, Req, State)
+            end;
+        _ ->
+            reply(404, <<"{\"error\":\"not found\"}">>, Req, State)
     end;
 
 handle(_, _, Req, State) ->
     reply(405, <<"{\"error\":\"method not allowed\"}">>, Req, State).
+
+format_job(Job) ->
+    JobId   = maps:get(job_id,   Job),
+    Status  = maps:get(status,   Job),
+    NodeId  = maps:get(node_id,  Job),
+    Command = maps:get(command,  Job),
+    Result  = maps:get(result,   Job),
+    ResultStr = case Result of
+        none -> <<"null">>;
+        R    -> list_to_binary(io_lib:format("\"~s\"", [R]))
+    end,
+    lists:flatten(io_lib:format(
+        "{\"job_id\":\"~s\",\"status\":\"~s\","
+        "\"node_id\":\"~s\",\"command\":\"~s\",\"result\":~s}",
+        [JobId, Status, NodeId, Command, ResultStr])).
 
 reply(Code, Body, Req, State) ->
     Req2 = cowboy_req:reply(Code,

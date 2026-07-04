@@ -1,6 +1,6 @@
 -module(lithium_registry).
 
--export([start/0, register_node/4, update_heartbeat/3,
+-export([start/0, register_node/5, update_heartbeat/3,
          get_node/1, all_nodes/0, mark_degraded/1,
          mark_inactive/1, mark_suspended/1, update_score/2]).
 
@@ -15,13 +15,14 @@ start() ->
     io:format("  Node registry initialized (~p nodes restored)~n",
               [length(Nodes)]).
 
-register_node(NodeId, PublicKey, Ip, Port) ->
+register_node(NodeId, PublicKey, Ip, Port, Fingerprint) ->
     Now = erlang:system_time(second),
     Node = #{
         node_id        => NodeId,
         public_key     => PublicKey,
         ip             => Ip,
         port           => Port,
+        fingerprint    => Fingerprint,
         registered_at  => Now,
         last_seen      => Now,
         status         => active,

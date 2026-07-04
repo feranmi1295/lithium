@@ -21,7 +21,8 @@ start(_StartType, _StartArgs) ->
             {"/jobs",       lithium_job_handler,       []},
             {"/jobs/:id",   lithium_job_handler,       []},
             {"/job_result", lithium_result_handler,    []},
-            {"/pubkey",     lithium_pubkey_handler,    []}
+            {"/pubkey",     lithium_pubkey_handler,    []},
+            {"/recover",    lithium_recover_handler,   []}
         ]}
     ]),
 

@@ -9,8 +9,9 @@ handle(<<"POST">>, Req0, State) ->
     {ok, Body, Req1} = cowboy_req:read_body(Req0),
     case get_field(Body, <<"node_id">>) of
         {ok, NodeId} ->
-            Ip   = get_field_default(Body, <<"ip">>,   <<"127.0.0.1">>),
-            Port = get_field_default(Body, <<"port">>,  <<"7701">>),
+            Ip          = get_default(Body, <<"ip">>,          <<"127.0.0.1">>),
+            Port        = get_default(Body, <<"port">>,        <<"7701">>),
+            Fingerprint = get_default(Body, <<"fingerprint">>, <<"">>),
             case lithium_registry:get_node(NodeId) of
                 {ok, _} ->
                     lithium_registry:update_heartbeat(NodeId, Ip, Port),
@@ -18,10 +19,14 @@ handle(<<"POST">>, Req0, State) ->
                 {error, not_found} ->
                     case get_field(Body, <<"public_key">>) of
                         {ok, PubKey} ->
-                            lithium_registry:register_node(NodeId, PubKey, Ip, Port),
-                            reply(200, <<"{\"status\":\"ok\",\"message\":\"registered\"}">>, Req1, State);
+                            lithium_registry:register_node(
+                                NodeId, PubKey, Ip, Port, Fingerprint),
+                            reply(200,
+                                <<"{\"status\":\"ok\",\"message\":\"registered\"}">>,
+                                Req1, State);
                         _ ->
-                            reply(404, <<"{\"error\":\"node not found\"}">>, Req1, State)
+                            reply(404, <<"{\"error\":\"node not found\"}">>,
+                                  Req1, State)
                     end
             end;
         _ ->
@@ -46,12 +51,12 @@ get_field(Body, Field) ->
             Start = Pos + length(Key),
             Rest  = string:sub_string(Str, Start),
             End   = string:str(Rest, "\""),
-            if End > 0 -> {ok, list_to_binary(string:sub_string(Rest, 1, End - 1))};
+            if End > 0 -> {ok, list_to_binary(string:sub_string(Rest, 1, End-1))};
                true    -> {error, malformed}
             end
     end.
 
-get_field_default(Body, Field, Default) ->
+get_default(Body, Field, Default) ->
     case get_field(Body, Field) of
         {ok, Val} -> Val;
         _         -> Default
